@@ -1,0 +1,9 @@
+[Unit]
+Description=Tamaso daily SQLite backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tamaso/backup.sh
+WorkingDirectory=/opt/tamaso

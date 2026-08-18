@@ -1,0 +1,114 @@
+# Tamaso customer GCE deployment — single-node Docker Compose.
+#
+# Images are referenced by full digest-pinned paths set in .env:
+#   BACKEND_IMAGE=us-central1-docker.pkg.dev/project/repo/prefix-backend@sha256:...
+#   FRONTEND_IMAGE=us-central1-docker.pkg.dev/project/repo/prefix-frontend@sha256:...
+
+name: tamaso-${CUSTOMER_ID}
+
+services:
+  data-init:
+    image: busybox:1.37.0
+    command:
+      - sh
+      - -c
+      - >-
+        chown -R 10001:10001 /data /backups /static &&
+        chmod 700 /data /backups &&
+        chmod 755 /static
+    restart: "no"
+    volumes:
+      - /var/lib/tamaso/${CUSTOMER_ID}/data:/data
+      - /var/lib/tamaso/${CUSTOMER_ID}/backups:/backups
+      - /var/lib/tamaso/${CUSTOMER_ID}/static:/static
+
+  backend:
+    image: ${BACKEND_IMAGE}
+    restart: unless-stopped
+    env_file: ${TAMASO_ENV_FILE:-.env}
+    environment:
+      DJANGO_DATABASE_URL: sqlite:////data/tamaso.sqlite3
+      DJANGO_STATIC_ROOT: /static
+      TAMASO_ADMIN_ENABLED: "true"
+      TAMASO_SINGLE_NODE: "true"
+      WORKSPACE_CACHE_TTL_SECONDS: "300"
+    command:
+      - gunicorn
+      - --chdir
+      - backend
+      - --bind
+      - 0.0.0.0:8000
+      - --workers
+      - "1"
+      - --threads
+      - "2"
+      - --timeout
+      - "90"
+      - --max-requests
+      - "500"
+      - --max-requests-jitter
+      - "50"
+      - config.wsgi:application
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    expose:
+      - "8000"
+    volumes:
+      - /var/lib/tamaso/${CUSTOMER_ID}/data:/data
+      - /var/lib/tamaso/${CUSTOMER_ID}/backups:/backups
+      - /var/lib/tamaso/${CUSTOMER_ID}/static:/static
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          r=urllib.request.Request('http://127.0.0.1:8000/health/',
+          headers={'Host':'${APP_HOST}','X-Forwarded-Proto':'https'});
+          urllib.request.urlopen(r, timeout=5)
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 60s
+    stop_grace_period: 30s
+    mem_limit: 640m
+    mem_reservation: 192m
+    memswap_limit: 1536m
+
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+      NODE_OPTIONS: --max-old-space-size=256
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose:
+      - "3000"
+    mem_limit: 320m
+    mem_reservation: 128m
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      APP_HOST: ${APP_HOST}
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/lib/tamaso/${CUSTOMER_ID}/static:/srv/static:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 96m
+
+volumes:
+  caddy-data:
+  caddy-config:
