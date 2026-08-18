@@ -18,6 +18,28 @@ provider "google" {
   region  = var.region
 }
 
+# --- Enable required APIs ---
+
+resource "google_project_service" "iap" {
+  service            = "iap.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "compute" {
+  service            = "compute.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "artifactregistry" {
+  service            = "artifactregistry.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "storage" {
+  service            = "storage.googleapis.com"
+  disable_on_destroy = false
+}
+
 locals {
   # Normalize customer_id for resource naming (lowercase, hyphens)
   customer_slug = lower(replace(var.customer_id, "/[^a-zA-Z0-9]/", "-"))
